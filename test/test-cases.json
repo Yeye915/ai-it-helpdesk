@@ -1,0 +1,100 @@
+[
+  {
+    "id": 1,
+    "payload": {
+      "ticketId": "TK001",
+      "title": "Không kết nối WiFi",
+      "description": "Laptop không thể kết nối WiFi công ty."
+    },
+    "expected": {
+      "category": "Network",
+      "priority": "High",
+      "assignedTeam": "Network Support",
+      "telegramAlert": true
+    }
+  },
+  {
+    "id": 2,
+    "payload": {
+      "ticketId": "TK002",
+      "title": "Máy tính không bật",
+      "description": "Nhấn nút nguồn nhưng máy tính không khởi động."
+    },
+    "expected": {
+      "category": "Hardware",
+      "priority": "Critical",
+      "assignedTeam": "Hardware Support",
+      "telegramAlert": true
+    }
+  },
+  {
+    "id": 3,
+    "payload": {
+      "ticketId": "TK003",
+      "title": "Không mở được Word",
+      "description": "Microsoft Word bị lỗi và không thể mở."
+    },
+    "expected": {
+      "category": "Software",
+      "priority": "Medium",
+      "assignedTeam": "Software Support",
+      "telegramAlert": false
+    }
+  },
+  {
+    "id": 4,
+    "payload": {
+      "ticketId": "TK004",
+      "title": "Quên mật khẩu email",
+      "description": "Tôi không nhớ mật khẩu email công ty."
+    },
+    "expected": {
+      "category": "Account",
+      "priority": "High",
+      "assignedTeam": "Account Support",
+      "telegramAlert": true
+    }
+  },
+  {
+    "id": 5,
+    "payload": {
+      "ticketId": "TK005",
+      "title": "Máy chạy chậm",
+      "description": "Máy tính chạy rất chậm khi mở ứng dụng."
+    },
+    "expected": {
+      "category": "Hardware",
+      "priority": "Medium",
+      "assignedTeam": "Hardware Support",
+      "telegramAlert": false
+    }
+  },
+  {
+    "id": 6,
+    "payload": {
+      "ticketId": "TK006",
+      "title": "Không cài được phần mềm",
+      "description": "Tôi không thể cài đặt phần mềm cần thiết cho công việc."
+    },
+    "expected": {
+      "category": "Software",
+      "priority": "Low",
+      "assignedTeam": "Software Support",
+      "telegramAlert": false
+    }
+  },
+  {
+    "id": 7,
+    "payload": {
+      "ticketId": "TK007",
+      "title": "Không truy cập được mạng nội bộ",
+      "description": "Máy tính không thể truy cập hệ thống mạng nội bộ công ty."
+    },
+    "expected": {
+      "category": "Network",
+      "priority": "High",
+      "assignedTeam": "Network Support",
+      "telegramAlert": true
+    }
+  }
+]
