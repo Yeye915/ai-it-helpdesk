@@ -144,26 +144,17 @@
     },
     {
       "parameters": {
-        "chatId": "={{ $env.TELEGRAM_CHAT_ID || '-100123456789' }}",
-        "text": "=🚨 IT HELPDESK ALERT\n\nTicket: {{ $json.ticketId }}\n\nTitle: {{ $json.title }}\n\nCategory: {{ $json.category }}\n\nPriority: {{ $json.priority }}\n\nAssigned Team: {{ $json.assignedTeam }}\n\nDescription:\n{{ $json.description }}",
-        "additionalFields": {
-          "appendAttribution": false
-        }
+        "webhookUri": "YOUR_DISCORD_WEBHOOK_URL",
+        "text": "=🚨 **IT HELPDESK ALERT**\n\n**Ticket:** {{ $json.ticketId }}\n\n**Title:** {{ $json.title }}\n\n**Category:** {{ $json.category }}\n\n**Priority:** {{ $json.priority }}\n\n**Assigned Team:** {{ $json.assignedTeam }}\n\n**Description:**\n{{ $json.description }}"
       },
-      "id": "node-telegram-alert-07",
-      "name": "Telegram Alert (High/Critical)",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1.2,
+      "id": "node-discord-alert-07",
+      "name": "Discord Alert (High/Critical)",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
       "position": [
         1680,
         200
-      ],
-      "credentials": {
-        "telegramApi": {
-          "id": "it-helpdesk-telegram-cred",
-          "name": "Telegram IT Alert Bot"
-        }
-      }
+      ]
     },
     {
       "parameters": {},
@@ -252,7 +243,7 @@
       "main": [
         [
           {
-            "node": "Telegram Alert (High/Critical)",
+            "node": "Discord Alert (High/Critical)",
             "type": "main",
             "index": 0
           }
@@ -266,7 +257,7 @@
         ]
       ]
     },
-    "Telegram Alert (High/Critical)": {
+    "Discord Alert (High/Critical)": {
       "main": [
         [
           {
