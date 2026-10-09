@@ -4,11 +4,11 @@ import Ticket from '../../../../models/Ticket';
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await connectDB();
-    const { id } = params; // Hoặc nếu Next.js yêu cầu await params thì dùng: const { id } = await params;
+    const { id } = await params;
     const body = await request.json();
 
     const updatedTicket = await Ticket.findOneAndUpdate(
@@ -24,8 +24,17 @@ export async function PATCH(
       );
     }
 
-    return NextResponse.json({ success: true, data: updatedTicket }, { status: 200 });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { success: true, data: updatedTicket },
+      { status: 200 }
+    );
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? error.message : 'Đã xảy ra lỗi máy chủ';
+
+    return NextResponse.json(
+      { success: false, error: message },
+      { status: 500 }
+    );
   }
 }
