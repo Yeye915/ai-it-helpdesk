@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import Ticket from '@/models/Ticket';
+import connectDB from '../../../../lib/mongodb';
+import Ticket from '../../../../models/Ticket';
 
 export async function PATCH(
   request: Request,
@@ -8,7 +8,7 @@ export async function PATCH(
 ) {
   try {
     await connectDB();
-    const { id } = params;
+    const { id } = params; // Hoặc nếu Next.js yêu cầu await params thì dùng: const { id } = await params;
     const body = await request.json();
 
     const updatedTicket = await Ticket.findOneAndUpdate(
