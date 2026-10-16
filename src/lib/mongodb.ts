@@ -1,11 +1,5 @@
 import mongoose from 'mongoose';
 
-const MONGODB_URI = process.env.MONGODB_URI;
-
-if (!MONGODB_URI) {
-  throw new Error('Vui lòng định nghĩa biến MONGODB_URI trong file .env.local');
-}
-
 let cached = (global as any).mongoose;
 
 if (!cached) {
@@ -13,17 +7,30 @@ if (!cached) {
 }
 
 async function connectDB() {
+  const MONGODB_URI = process.env.MONGODB_URI;
+
+  if (!MONGODB_URI) {
+    throw new Error('Vui lòng định nghĩa biến MONGODB_URI trong file .env.local');
+  }
+
   if (cached.conn) {
     return cached.conn;
   }
 
   if (!cached.promise) {
     const opts = { bufferCommands: false };
-    cached.promise = mongoose.connect(MONGODB_URI!, opts).then((mongoose) => {
+    cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
       return mongoose;
     });
   }
-  cached.conn = await cached.promise;
+
+  try {
+    cached.conn = await cached.promise;
+  } catch (error) {
+    cached.promise = null;
+    throw error;
+  }
+
   return cached.conn;
 }
 

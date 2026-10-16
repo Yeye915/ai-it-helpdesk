@@ -1,0 +1,142 @@
+{
+  "name": "03 - AI Access Request Agent (Resource Access & Approval Workflow)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "access-request",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-access-webhook-01",
+      "name": "Webhook (Receive Access Request)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "access-request-webhook-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\n\nconst employeeName = body.employeeName || body.name || 'Nguyen Van A';\nconst employeeEmail = body.employeeEmail || body.email || 'employee@company.com';\nconst department = body.department || 'Engineering';\nconst systemName = body.systemName || body.system || 'Production Database';\nconst accessLevel = body.accessLevel || 'Read-Write';\nconst reason = body.reason || 'Cần truy cập để bảo trì hệ thống và fix lỗi';\n\nconst requestId = `REQ-${Math.floor(100000 + Math.random() * 900000)}`;\n\nreturn {\n  requestId,\n  employeeName,\n  employeeEmail,\n  department,\n  systemName,\n  accessLevel,\n  reason,\n  requestedAt: new Date().toISOString()\n};"
+      },
+      "id": "node-access-validate-02",
+      "name": "Validate & Prepare Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+        "authentication": "none",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "YOUR_GEMINI_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"You are an AI Security and IT Access Compliance Officer. Analyze this employee access request:\\nEmployee: {{ $json.employeeName }} ({{ $json.department }})\\nTarget System: {{ $json.systemName }}\\nAccess Level: {{ $json.accessLevel }}\\nReason: {{ $json.reason }}\\n\\nEvaluate:\\n1. Risk Level: Low, Medium, High, or Critical.\\n2. Security recommendation: Suggest whether approval should be Recommended, Manual Review, or Highly Restricted.\\n3. Justification summary in Vietnamese for the IT Manager.\\n\\nRespond in strict JSON:\\n{\\n  \\\"riskLevel\\\": \\\"Medium\\\",\\n  \\\"recommendation\\\": \\\"Manual Review\\\",\\n  \\\"evaluationNote\\\": \\\"Lý do đánh giá rủi ro và các biện pháp bảo mật cần kiểm tra\\\"\\n}\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"responseMimeType\": \"application/json\",\n    \"temperature\": 0.1\n  }\n}"
+      },
+      "id": "node-access-gemini-03",
+      "name": "Gemini AI Risk Assessment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Validate & Prepare Request').first().json;\nconst aiRaw = $input.first().json;\n\nlet text = '';\nif (aiRaw.candidates?.[0]?.content?.parts?.[0]?.text) {\n  text = aiRaw.candidates[0].content.parts[0].text;\n} else {\n  text = JSON.stringify(aiRaw);\n}\n\ntext = text.replace(/```json\\s*/gi, '').replace(/```\\s*$/gi, '').trim();\nlet parsed = {};\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = {\n    riskLevel: \"Medium\",\n    recommendation: \"Manual Review\",\n    evaluationNote: \"Yêu cầu cần quản lý IT xem xét thủ công trước khi cấp quyền.\"\n  };\n}\n\nreturn {\n  requestId: prev.requestId,\n  employeeName: prev.employeeName,\n  employeeEmail: prev.employeeEmail,\n  department: prev.department,\n  systemName: prev.systemName,\n  accessLevel: prev.accessLevel,\n  reason: prev.reason,\n  riskLevel: parsed.riskLevel || \"Medium\",\n  recommendation: parsed.recommendation || \"Manual Review\",\n  evaluationNote: parsed.evaluationNote || \"\",\n  status: \"Pending Approval\",\n  createdAt: new Date().toISOString()\n};"
+      },
+      "id": "node-access-parse-04",
+      "name": "Parse AI Risk & Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "collection": "access_requests",
+        "fields": "requestId,employeeName,employeeEmail,department,systemName,accessLevel,reason,riskLevel,recommendation,status,createdAt",
+        "options": {}
+      },
+      "id": "node-access-mongodb-05",
+      "name": "MongoDB Save Access Request",
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1.1,
+      "position": [1160, 300],
+      "credentials": {
+        "mongoDb": {
+          "id": "it-helpdesk-mongodb-cred",
+          "name": "MongoDB Atlas it_helpdesk"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "it-manager@company.com",
+        "subject": "=🔐 [XIN CẤP QUYỀN - {{ $json.riskLevel }}] {{ $json.requestId }} - {{ $json.employeeName }} xin truy cập {{ $json.systemName }}",
+        "emailType": "text",
+        "message": "=Kính gửi IT Manager,\n\nHệ thống ghi nhận yêu cầu xin cấp quyền truy cập mới:\n- Mã yêu cầu: {{ $json.requestId }}\n- Nhân viên: {{ $json.employeeName }} ({{ $json.department }})\n- Hệ thống: {{ $json.systemName }} (Mức quyền: {{ $json.accessLevel }})\n- Lý do: {{ $json.reason }}\n\nĐÁNH GIÁ TỪ AI BẢO MẬT:\n- Mức độ rủi ro: {{ $json.riskLevel }}\n- Khuyến nghị: {{ $json.recommendation }}\n- Ghi chú: {{ $json.evaluationNote }}\n\nVui lòng phản hồi phê duyệt trên cổng IT Portal."
+      },
+      "id": "node-access-notify-06",
+      "name": "Notify IT Manager (Email)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Yêu cầu cấp quyền đã được tiếp nhận và chuyển đến IT Manager phê duyệt.\",\n  \"requestId\": \"{{ $json.requestId }}\",\n  \"systemName\": \"{{ $json.systemName }}\",\n  \"riskLevel\": \"{{ $json.riskLevel }}\",\n  \"status\": \"{{ $json.status }}\"\n}",
+        "options": {}
+      },
+      "id": "node-access-respond-07",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1640, 300]
+    }
+  ],
+  "connections": {
+    "Webhook (Receive Access Request)": {
+      "main": [
+        [{ "node": "Validate & Prepare Request", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validate & Prepare Request": {
+      "main": [
+        [{ "node": "Gemini AI Risk Assessment", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gemini AI Risk Assessment": {
+      "main": [
+        [{ "node": "Parse AI Risk & Format", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse AI Risk & Format": {
+      "main": [
+        [{ "node": "MongoDB Save Access Request", "type": "main", "index": 0 }]
+      ]
+    },
+    "MongoDB Save Access Request": {
+      "main": [
+        [{ "node": "Notify IT Manager (Email)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notify IT Manager (Email)": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

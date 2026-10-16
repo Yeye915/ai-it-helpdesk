@@ -1,0 +1,140 @@
+{
+  "name": "07 - AI Asset Management Agent (Hardware Health & License Tracking)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "node-asset-schedule-01",
+      "name": "Daily Schedule Trigger (8 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 200]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "asset-audit",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-asset-webhook-02",
+      "name": "Webhook (Manual Audit Trigger)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 420],
+      "webhookId": "asset-audit-webhook-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Danh sách tài sản phần cứng và bản quyền phần mềm doanh nghiệp\nconst assets = [\n  { tag: \"LAP-042\", type: \"Laptop\", model: \"Dell Latitude 5420\", user: \"Hoang Nam\", warrantyEnd: \"2026-10-25\", batteryHealth: \"62%\", status: \"In Use\" },\n  { tag: \"LAP-089\", type: \"Laptop\", model: \"MacBook Pro M1 2020\", user: \"Linh Chi\", warrantyEnd: \"2026-11-05\", batteryHealth: \"88%\", status: \"In Use\" },\n  { tag: \"MON-103\", type: \"Monitor\", model: \"LG 27UP850\", user: \"Kho Phụ\", warrantyEnd: \"2027-05-10\", status: \"Spare\" },\n  { tag: \"LIC-ADOBE\", type: \"Software License\", name: \"Adobe Creative Cloud\", total: 15, active: 8, costPerYear: \"$9,000\", renewalDate: \"2026-11-15\" },\n  { tag: \"LIC-JETBRAINS\", type: \"Software License\", name: \"JetBrains All Products\", total: 20, active: 19, costPerYear: \"$5,000\", renewalDate: \"2027-02-01\" }\n];\n\nreturn {\n  assets,\n  auditDate: new Date().toISOString().split('T')[0]\n};"
+      },
+      "id": "node-asset-inventory-03",
+      "name": "Fetch Asset & License Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+        "authentication": "none",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "YOUR_GEMINI_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"You are an AI IT Asset and Software License Optimization Manager. Analyze the following corporate asset inventory:\\n\\n{{ JSON.stringify($json.assets, null, 2) }}\\n\\nAnalyze:\\n1. Warranties expiring soon (< 30 days) and devices needing battery maintenance.\\n2. Software license waste / underutilization (e.g. Adobe licenses active vs total paid).\\n3. Provide 3 high-impact recommendations to save cost and prevent hardware failure.\\n\\nReturn strict JSON:\\n{\\n  \\\"highRiskCount\\\": 2,\\n  \\\"expiringWarranties\\\": [\\\"LAP-042 hết bảo hành trong 10 ngày (pin 62%)\\\"],\\n  \\\"licenseOptimization\\\": \\\"Adobe Creative Cloud chỉ sử dụng 8/15 license (lãng phí 7 license)\\\",\\n  \\\"recommendations\\\": [\\\"Thu hồi hoặc giảm bớt 7 license Adobe để tiết kiệm ngân sách\\\", \\\"Lên lịch thay pin cho LAP-042\\\"],\\n  \\\"reportSummary\\\": \\\"Bản tóm tắt quản trị tài sản bằng tiếng Việt\\\"\\n}\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"responseMimeType\": \"application/json\",\n    \"temperature\": 0.1\n  }\n}"
+      },
+      "id": "node-asset-gemini-04",
+      "name": "Gemini AI Asset Audit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Fetch Asset & License Data').first().json;\nconst aiRaw = $input.first().json;\n\nlet text = '';\nif (aiRaw.candidates?.[0]?.content?.parts?.[0]?.text) {\n  text = aiRaw.candidates[0].content.parts[0].text;\n} else {\n  text = JSON.stringify(aiRaw);\n}\n\ntext = text.replace(/```json\\s*/gi, '').replace(/```\\s*$/gi, '').trim();\nlet parsed = {};\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = {\n    highRiskCount: 1,\n    expiringWarranties: [\"Kiểm tra thiết bị LAP-042\"],\n    licenseOptimization: \"Cần rà soát bản quyền phần mềm\",\n    recommendations: [\"Tối ưu hóa chi phí IT\"],\n    reportSummary: \"Báo cáo tài sản định kỳ\"\n  };\n}\n\nreturn {\n  auditDate: prev.auditDate,\n  highRiskCount: parsed.highRiskCount || 0,\n  expiringWarranties: parsed.expiringWarranties || [],\n  licenseOptimization: parsed.licenseOptimization || '',\n  recommendations: parsed.recommendations || [],\n  reportSummary: parsed.reportSummary || ''\n};"
+      },
+      "id": "node-asset-parse-05",
+      "name": "Parse Audit Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "it-asset-manager@company.com",
+        "subject": "=💻 [BÁO CÁO TÀI SẢN IT] {{ $json.auditDate }} - Phát hiện {{ $json.highRiskCount }} cảnh báo rủi ro",
+        "emailType": "text",
+        "message": "=Kính gửi Quản lý Tài sản IT,\n\nHệ thống AI Asset Management vừa hoàn tất quét định kỳ ngày {{ $json.auditDate }}:\n\n1. CẢNH BÁO BẢO HÀNH & THIẾT BỊ SẮP HỎNG:\n{{ $json.expiringWarranties.map(item => '• ' + item).join('\\n') }}\n\n2. TỐI ƯU HÓA BẢN QUYỀN PHẦN MỀM:\n{{ $json.licenseOptimization }}\n\n3. ĐỀ XUẤT HÀNH ĐỘNG:\n{{ $json.recommendations.map(item => '• ' + item).join('\\n') }}\n\nChi tiết tóm tắt:\n{{ $json.reportSummary }}"
+      },
+      "id": "node-asset-notify-06",
+      "name": "Notify Asset Manager (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1160, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"auditDate\": \"{{ $json.auditDate }}\",\n  \"highRiskCount\": {{ $json.highRiskCount }},\n  \"expiringWarranties\": {{ JSON.stringify($json.expiringWarranties) }},\n  \"licenseOptimization\": \"{{ $json.licenseOptimization }}\",\n  \"recommendations\": {{ JSON.stringify($json.recommendations) }}\n}",
+        "options": {}
+      },
+      "id": "node-asset-respond-07",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1400, 300]
+    }
+  ],
+  "connections": {
+    "Daily Schedule Trigger (8 AM)": {
+      "main": [
+        [{ "node": "Fetch Asset & License Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Webhook (Manual Audit Trigger)": {
+      "main": [
+        [{ "node": "Fetch Asset & License Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Asset & License Data": {
+      "main": [
+        [{ "node": "Gemini AI Asset Audit", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gemini AI Asset Audit": {
+      "main": [
+        [{ "node": "Parse Audit Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Audit Results": {
+      "main": [
+        [{ "node": "Notify Asset Manager (Gmail)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notify Asset Manager (Gmail)": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

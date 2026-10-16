@@ -1,0 +1,100 @@
+{
+  "name": "04 - AI IT Knowledge Base Agent (Internal Documentation & RAG Q&A)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "knowledge-base",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-kb-webhook-01",
+      "name": "Webhook (Ask Knowledge Base)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "it-kb-webhook-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst query = (body.query || body.question || body.text || '').trim();\n\nif (!query) {\n  throw new Error(\"[KB Error] Câu hỏi không được để trống!\");\n}\n\n// Tài liệu cẩm nang kỹ thuật nội bộ công ty (Internal IT Knowledge Base)\nconst internalKnowledgeBase = `\n[TÀI LIỆU IT NỘI BỘ - CÔNG TY TNHH CÔNG NGHỆ]\n1. Mạng & WiFi:\n- WiFi Văn phòng: Tên 'CORP-SECURE', Mật khẩu 'TechCorp@2026!'. Thiết bị phải cài chứng chỉ bảo mật 802.1x.\n- VPN Công ty: Truy cập 'vpn.company.com', dùng tài khoản Single Sign-On (SSO) và xác thực 2 bước (MFA) qua Google Authenticator.\n\n2. Máy in & Thiết bị ngoại vi:\n- Máy in Tầng 2 (Phòng Kinh Doanh & Kế Toán): IP '192.168.10.250', Driver Canon LBP 2900.\n- Máy in Tầng 3 (Phòng Kỹ Thuật & Khối Sáng Tạo): IP '192.168.10.251', Driver HP LaserJet Pro M404dn (Hỗ trợ in 2 mặt tự động).\n- Cách kết nối: Vào Control Panel -> Devices and Printers -> Add Printer -> Chọn IP tương ứng.\n\n3. Phần mềm văn phòng & Tài khoản:\n- Cài đặt Office 365: Đăng nhập 'portal.office.com' bằng email công ty (@company.com), tải bộ cài Office Installer.\n- Quên mật khẩu email/SSO: Truy cập 'id.company.com/recovery' hoặc gửi yêu cầu reset mật khẩu qua hệ thống Helpdesk.\n- Cấp quyền phần mềm: Yêu cầu mở ticket trên IT Portal hoặc gửi Access Request.\n\n4. Sự cố máy tính cơ bản:\n- Máy bị treo phần mềm: Nhấn Ctrl + Shift + Esc để mở Task Manager -> Chọn ứng dụng đơ -> End Task.\n- Màn hình xanh hoặc mất mạng đột ngột: Khởi động lại máy (Restart), cắm lại cáp mạng LAN hoặc tắt bật lại nút WiFi.\n`;\n\nreturn {\n  query,\n  internalKnowledgeBase,\n  askedAt: new Date().toISOString()\n};"
+      },
+      "id": "node-kb-load-context-02",
+      "name": "Load Internal IT Docs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+        "authentication": "none",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "YOUR_GEMINI_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"You are an AI IT Knowledge Base Agent for the company. Use ONLY the following internal IT documentation to answer the employee's query.\\n\\nInternal Knowledge Docs:\\n{{ $json.internalKnowledgeBase }}\\n\\nEmployee Question: \\\"{{ $json.query }}\\\"\\n\\nInstructions:\\n1. Provide a step-by-step, clear, friendly answer in Vietnamese.\\n2. If the document does not contain the answer, advise them to submit a ticket to the IT Helpdesk team.\\n3. List the relevant section title referenced.\\n\\nReturn strict JSON:\\n{\\n  \\\"found\\\": true,\\n  \\\"answer\\\": \\\"Hướng dẫn chi tiết từng bước bằng tiếng Việt\\\",\\n  \\\"steps\\\": [\\\"Bước 1...\\\", \\\"Bước 2...\\\"],\\n  \\\"sourceSection\\\": \\\"2. Máy in & Thiết bị ngoại vi\\\"\\n}\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"responseMimeType\": \"application/json\",\n    \"temperature\": 0.1\n  }\n}"
+      },
+      "id": "node-kb-gemini-03",
+      "name": "Gemini RAG Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Load Internal IT Docs').first().json;\nconst aiRaw = $input.first().json;\n\nlet text = '';\nif (aiRaw.candidates?.[0]?.content?.parts?.[0]?.text) {\n  text = aiRaw.candidates[0].content.parts[0].text;\n} else {\n  text = JSON.stringify(aiRaw);\n}\n\ntext = text.replace(/```json\\s*/gi, '').replace(/```\\s*$/gi, '').trim();\nlet parsed = {};\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = {\n    found: true,\n    answer: text,\n    steps: [],\n    sourceSection: \"Cẩm nang IT tổng hợp\"\n  };\n}\n\nreturn {\n  query: prev.query,\n  found: parsed.found !== false,\n  answer: parsed.answer || \"Không tìm thấy tài liệu phù hợp. Vui lòng tạo ticket hỗ trợ.\",\n  steps: parsed.steps || [],\n  sourceSection: parsed.sourceSection || \"Tài liệu nội bộ\"\n};"
+      },
+      "id": "node-kb-parse-04",
+      "name": "Parse & Format Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"query\": \"{{ $json.query }}\",\n  \"found\": {{ $json.found }},\n  \"answer\": \"{{ $json.answer }}\",\n  \"steps\": {{ JSON.stringify($json.steps) }},\n  \"sourceSection\": \"{{ $json.sourceSection }}\"\n}",
+        "options": {}
+      },
+      "id": "node-kb-respond-05",
+      "name": "Respond with Solution",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1160, 300]
+    }
+  ],
+  "connections": {
+    "Webhook (Ask Knowledge Base)": {
+      "main": [
+        [{ "node": "Load Internal IT Docs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Load Internal IT Docs": {
+      "main": [
+        [{ "node": "Gemini RAG Query", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gemini RAG Query": {
+      "main": [
+        [{ "node": "Parse & Format Answer", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse & Format Answer": {
+      "main": [
+        [{ "node": "Respond with Solution", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

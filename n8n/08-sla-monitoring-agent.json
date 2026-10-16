@@ -1,0 +1,194 @@
+{
+  "name": "08 - AI SLA Monitoring Agent (SLA Timers & Automated Escalation)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "node-sla-cron-01",
+      "name": "Schedule Trigger (Every 15m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 200]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sla-check",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-sla-webhook-02",
+      "name": "Webhook (Manual SLA Test Trigger)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 420],
+      "webhookId": "sla-check-webhook-id"
+    },
+    {
+      "parameters": {
+        "operation": "find",
+        "collection": "tickets",
+        "query": "={ \"status\": \"Open\" }",
+        "options": {}
+      },
+      "id": "node-sla-mongodb-03",
+      "name": "MongoDB Find Open Tickets",
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1.1,
+      "position": [440, 300],
+      "credentials": {
+        "mongoDb": {
+          "id": "it-helpdesk-mongodb-cred",
+          "name": "MongoDB Atlas it_helpdesk"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst now = Date.now();\n\n// SLA định mức thời gian xử lý tối đa theo phút:\nconst SLA_LIMITS = {\n  'Critical': 30,    // 30 phút\n  'High': 120,       // 2 tiếng\n  'Medium': 480,     // 8 tiếng\n  'Low': 1440        // 24 tiếng\n};\n\nconst breachedTickets = [];\n\nfor (const item of items) {\n  const ticket = item.json;\n  const priority = ticket.priority || 'Medium';\n  const limitMinutes = SLA_LIMITS[priority] || 480;\n  const createdAt = ticket.createdAt ? new Date(ticket.createdAt).getTime() : now;\n  const elapsedMinutes = Math.floor((now - createdAt) / (1000 * 60));\n\n  // Kiểm tra nếu thời gian chờ vượt quá giới hạn SLA và chưa được cảnh báo trước đó\n  if (elapsedMinutes >= limitMinutes && !ticket.escalated) {\n    breachedTickets.push({\n      ticketId: ticket.ticketId || 'TCK-UNKNOWN',\n      title: ticket.title || 'Không có tiêu đề',\n      priority: priority,\n      assignedTeam: ticket.assignedTeam || 'IT General',\n      elapsedMinutes: elapsedMinutes,\n      allowedMinutes: limitMinutes,\n      overdueBy: elapsedMinutes - limitMinutes\n    });\n  }\n}\n\nreturn {\n  totalOpen: items.length,\n  breachedCount: breachedTickets.length,\n  breachedTickets,\n  checkedAt: new Date().toISOString()\n};"
+      },
+      "id": "node-sla-calc-04",
+      "name": "Calculate SLA Breaches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-has-breaches",
+              "leftValue": "={{ $json.breachedCount }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "node-sla-if-05",
+      "name": "Check If SLA Breached",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+        "authentication": "none",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "YOUR_GEMINI_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"You are an IT Service Level Agreement (SLA) Manager. The following tickets have violated their resolution SLA timers:\\n{{ JSON.stringify($json.breachedTickets, null, 2) }}\\n\\nCompose an urgent escalation telegram message in Vietnamese for the IT Team Lead. Include the ticket IDs, delayed times, affected teams, and immediate action items.\\n\\nFormat clearly with emojis (🚨, ⚠️, ⏰). Return strict JSON:\\n{\\n  \\\"alertMessage\\\": \\\"Nội dung thông báo khẩn cấp đầy đủ\\\"\\n}\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"responseMimeType\": \"application/json\",\n    \"temperature\": 0.1\n  }\n}"
+      },
+      "id": "node-sla-gemini-06",
+      "name": "Gemini Compose SLA Escalation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1160, 200]
+    },
+    {
+      "parameters": {
+        "sendTo": "it-lead@company.com",
+        "subject": "=🚨 [CẢNH BÁO SLA] Phát hiện {{ $('Calculate SLA Breaches').first().json.breachedCount }} Ticket quá hạn cam kết",
+        "emailType": "text",
+        "message": "={{ $json.candidates?.[0]?.content?.parts?.[0]?.text ? JSON.parse($json.candidates[0].content.parts[0].text).alertMessage : 'Phát hiện sự cố trễ hạn SLA. Đề nghị KTV kiểm tra.' }}"
+      },
+      "id": "node-sla-notify-07",
+      "name": "Send SLA Escalation (Email / Telegram)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1400, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"breachedCount\": {{ $node['Calculate SLA Breaches'].json.breachedCount }},\n  \"breachedTickets\": {{ JSON.stringify($node['Calculate SLA Breaches'].json.breachedTickets) }},\n  \"status\": \"Escalation Alert Triggered\"\n}",
+        "options": {}
+      },
+      "id": "node-sla-respond-breached-08",
+      "name": "Respond (Breached)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1640, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"breachedCount\": 0,\n  \"message\": \"Tất cả các ticket đang mở đều nằm trong hạn thời gian cam kết SLA.\"\n}",
+        "options": {}
+      },
+      "id": "node-sla-respond-ok-09",
+      "name": "Respond (All OK)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1160, 420]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Every 15m)": {
+      "main": [
+        [{ "node": "MongoDB Find Open Tickets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Webhook (Manual SLA Test Trigger)": {
+      "main": [
+        [{ "node": "MongoDB Find Open Tickets", "type": "main", "index": 0 }]
+      ]
+    },
+    "MongoDB Find Open Tickets": {
+      "main": [
+        [{ "node": "Calculate SLA Breaches", "type": "main", "index": 0 }]
+      ]
+    },
+    "Calculate SLA Breaches": {
+      "main": [
+        [{ "node": "Check If SLA Breached", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check If SLA Breached": {
+      "main": [
+        [{ "node": "Gemini Compose SLA Escalation", "type": "main", "index": 0 }],
+        [{ "node": "Respond (All OK)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gemini Compose SLA Escalation": {
+      "main": [
+        [{ "node": "Send SLA Escalation (Email / Telegram)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send SLA Escalation (Email / Telegram)": {
+      "main": [
+        [{ "node": "Respond (Breached)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

@@ -1,0 +1,289 @@
+{
+  "name": "AI IT Helpdesk - Ticket Classification & Routing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ticket-classifier",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-01",
+      "name": "Webhook (Receive Ticket)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "webhookId": "it-helpdesk-webhook-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Trích xuất dữ liệu từ Webhook (hỗ trợ cả dạng body hoặc root json)\nconst inputData = $input.first().json.body || $input.first().json;\n\nconst ticketId = inputData.ticketId ? String(inputData.ticketId).trim() : null;\nconst title = inputData.title ? String(inputData.title).trim() : null;\nconst description = inputData.description ? String(inputData.description).trim() : null;\n\n// 2. Validate dữ liệu đầu vào bắt buộc\nconst errors = [];\nif (!ticketId) errors.push(\"Thiếu trường bắt buộc: 'ticketId'\");\nif (!title) errors.push(\"Thiếu trường bắt buộc: 'title'\");\nif (!description) errors.push(\"Thiếu trường bắt buộc: 'description'\");\n\nif (errors.length > 0) {\n  throw new Error(`[Input Validation Error] ${errors.join(' | ')}`);\n}\n\n// 3. Trả về dữ liệu đã được chuẩn hóa\nreturn {\n  ticketId,\n  title,\n  description,\n  receivedAt: new Date().toISOString()\n};"
+      },
+      "id": "node-validate-input-02",
+      "name": "Validate & Prepare Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+        "authentication": "none",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "YOUR_GEMINI_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"You are an expert IT Helpdesk Dispatcher. Analyze the following IT support ticket title and description, then classify it.\\n\\nRules:\\n1. Allowed category values ONLY: Hardware, Software, Network, Account, Other\\n2. Allowed priority values ONLY: Low, Medium, High, Critical\\n3. Allowed assignedTeam values ONLY:\\n   - Hardware Support (for category Hardware)\\n   - Software Support (for category Software)\\n   - Network Support (for category Network)\\n   - Account Support (for category Account)\\n   - IT General (for category Other)\\n\\nPriority Guidelines:\\n- Critical: System down, cannot boot, security breach, company-wide block.\\n- High: WiFi/Network lost, password/account locked preventing work, internal network inaccessible.\\n- Medium: Software crash/Word error, PC slow but working.\\n- Low: Cannot install non-critical software, minor cosmetic bug, general questions.\\n\\nInput Ticket:\\nTitle: {{ $json.title }}\\nDescription: {{ $json.description }}\\n\\nRespond strictly with a valid JSON object only. Do NOT wrap in markdown or backticks (no ```json). Output format:\\n{\\n  \\\"category\\\": \\\"Network\\\",\\n  \\\"priority\\\": \\\"High\\\",\\n  \\\"assignedTeam\\\": \\\"Network Support\\\",\\n  \\\"reason\\\": \\\"Explanation in English\\\"\\n}\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"responseMimeType\": \"application/json\",\n    \"temperature\": 0.1\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "node-ai-classify-03",
+      "name": "AI Classification (Gemini API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Lấy thông tin ticket ban đầu từ node Validate & Prepare Input\nconst prevInput = $('Validate & Prepare Input').first().json;\n\n// 2. Lấy kết quả thô từ AI (Hỗ trợ định dạng response từ Gemini API, OpenAI hoặc chuỗi text)\nconst aiResponse = $input.first().json;\nlet rawContent = '';\n\nif (aiResponse.candidates && aiResponse.candidates[0]?.content?.parts?.[0]?.text) {\n  // Response từ Gemini REST API\n  rawContent = aiResponse.candidates[0].content.parts[0].text;\n} else if (aiResponse.choices && aiResponse.choices[0]?.message?.content) {\n  // Response từ OpenAI REST API\n  rawContent = aiResponse.choices[0].message.content;\n} else if (typeof aiResponse === 'string') {\n  rawContent = aiResponse;\n} else if (aiResponse.category && aiResponse.priority) {\n  rawContent = JSON.stringify(aiResponse);\n} else {\n  rawContent = JSON.stringify(aiResponse);\n}\n\n// 3. Làm sạch markdown backticks nếu có\nrawContent = rawContent.replace(/```json\\s*/gi, '').replace(/```\\s*$/gi, '').trim();\n\n// 4. Parse JSON với try/catch an toàn\nlet parsed = {};\ntry {\n  parsed = JSON.parse(rawContent);\n} catch (err) {\n  // Fallback an toàn nếu AI trả về chuỗi lỗi\n  parsed = {\n    category: \"Other\",\n    priority: \"Medium\",\n    assignedTeam: \"IT General\",\n    reason: \"AI output was not valid JSON, defaulted to safe fallback.\"\n  };\n}\n\n// 5. Chuẩn hóa & Validate danh mục hợp lệ\nconst validCategories = [\"Hardware\", \"Software\", \"Network\", \"Account\", \"Other\"];\nconst validPriorities = [\"Low\", \"Medium\", \"High\", \"Critical\"];\n\nlet category = validCategories.includes(parsed.category) ? parsed.category : \"Other\";\nlet priority = validPriorities.includes(parsed.priority) ? parsed.priority : \"Medium\";\n\n// 6. Ép chuẩn Routing Table chính xác 100%\nconst routingTable = {\n  \"Hardware\": \"Hardware Support\",\n  \"Software\": \"Software Support\",\n  \"Network\": \"Network Support\",\n  \"Account\": \"Account Support\",\n  \"Other\": \"IT General\"\n};\n\nconst assignedTeam = routingTable[category] || \"IT General\";\nconst reason = parsed.reason || `Auto-classified into ${category} with ${priority} priority.`;\n\n// 7. Trả về output hoàn chỉnh để cập nhật MongoDB và gửi Telegram\nreturn {\n  ticketId: prevInput.ticketId,\n  title: prevInput.title,\n  description: prevInput.description,\n  category,\n  priority,\n  assignedTeam,\n  reason,\n  processedAt: new Date().toISOString()\n};"
+      },
+      "id": "node-parse-ai-04",
+      "name": "Parse & Validate AI Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "collection": "tickets",
+        "updateKey": "ticketId",
+        "fields": "category,priority,assignedTeam",
+        "options": {}
+      },
+      "id": "node-mongodb-update-05",
+      "name": "MongoDB Update Ticket",
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1.1,
+      "position": [
+        1180,
+        300
+      ],
+      "credentials": {
+        "mongoDb": {
+          "id": "it-helpdesk-mongodb-cred",
+          "name": "MongoDB Atlas it_helpdesk"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-high",
+              "leftValue": "={{ $json.priority }}",
+              "rightValue": "High",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "condition-critical",
+              "leftValue": "={{ $json.priority }}",
+              "rightValue": "Critical",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "node-if-priority-06",
+      "name": "IF High or Critical",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL@gmail.com",
+        "subject": "=🚨 [IT HELPDESK ALERT] {{ $json.ticketId }} - {{ $json.title }}",
+        "emailType": "text",
+        "message": "=🚨 IT HELPDESK ALERT\n\nTicket: {{ $json.ticketId }}\n\nTitle: {{ $json.title }}\n\nCategory: {{ $json.category }}\n\nPriority: {{ $json.priority }}\n\nAssigned Team: {{ $json.assignedTeam }}\n\nDescription:\n{{ $json.description }}"
+      },
+      "id": "node-gmail-alert-07",
+      "name": "Gmail Alert (High/Critical)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1680,
+        200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "node-noop-low-med-08",
+      "name": "End (Low/Medium - No Alert)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Ticket processed and classified successfully\",\n  \"ticketId\": \"{{ $json.ticketId }}\",\n  \"category\": \"{{ $json.category }}\",\n  \"priority\": \"{{ $json.priority }}\",\n  \"assignedTeam\": \"{{ $json.assignedTeam }}\"\n}",
+        "options": {}
+      },
+      "id": "node-respond-webhook-09",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1920,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook (Receive Ticket)": {
+      "main": [
+        [
+          {
+            "node": "Validate & Prepare Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Prepare Input": {
+      "main": [
+        [
+          {
+            "node": "AI Classification (Gemini API)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Classification (Gemini API)": {
+      "main": [
+        [
+          {
+            "node": "Parse & Validate AI Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Validate AI Output": {
+      "main": [
+        [
+          {
+            "node": "MongoDB Update Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MongoDB Update Ticket": {
+      "main": [
+        [
+          {
+            "node": "IF High or Critical",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF High or Critical": {
+      "main": [
+        [
+          {
+            "node": "Gmail Alert (High/Critical)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "End (Low/Medium - No Alert)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Alert (High/Critical)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "End (Low/Medium - No Alert)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

@@ -1,0 +1,169 @@
+{
+  "name": "02 - AI IT Helpdesk Agent (Receive Requests & Auto Create Tickets)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "it-helpdesk-agent",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-agent-webhook-01",
+      "name": "Webhook (Receive User Query)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "it-agent-webhook-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputData = $input.first().json.body || $input.first().json;\n\nconst query = inputData.message || inputData.query || inputData.text || '';\nconst userEmail = inputData.email || inputData.userEmail || 'employee@company.com';\nconst userName = inputData.name || inputData.userName || 'Employee';\n\nif (!query.trim()) {\n  throw new Error(\"[Validation Error] Message không được để trống!\");\n}\n\nreturn {\n  query,\n  userEmail,\n  userName,\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "node-agent-validate-02",
+      "name": "Validate Input Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+        "authentication": "none",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "YOUR_GEMINI_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"You are an AI IT Helpdesk Frontline Agent. A company employee sends you a message: \\\"{{ $json.query }}\\\".\\n\\nAnalyze the intent:\\n1. If it is a general greeting or simple question with an immediate answer, set needTicket=false and provide a polite, helpful reply in Vietnamese.\\n2. If it is an IT technical problem or service request requiring IT assistance, set needTicket=true, generate a concise title and detailed description, estimate category (Hardware, Software, Network, Account, Other), and priority (Low, Medium, High, Critical).\\n\\nRespond strictly with JSON:\\n{\\n  \\\"needTicket\\\": true,\\n  \\\"replyMessage\\\": \\\"Lời giải đáp hoặc thông báo đã nhận sự cố\\\",\\n  \\\"ticketTitle\\\": \\\"Tiêu đề ngắn gọn\\\",\\n  \\\"ticketDescription\\\": \\\"Mô tả chi tiết\\\",\\n  \\\"category\\\": \\\"Software\\\",\\n  \\\"priority\\\": \\\"Medium\\\"\\n}\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"responseMimeType\": \"application/json\",\n    \"temperature\": 0.2\n  }\n}"
+      },
+      "id": "node-agent-gemini-03",
+      "name": "Gemini Intent & Ticket Extraction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Validate Input Query').first().json;\nconst aiRaw = $input.first().json;\n\nlet text = '';\nif (aiRaw.candidates?.[0]?.content?.parts?.[0]?.text) {\n  text = aiRaw.candidates[0].content.parts[0].text;\n} else {\n  text = JSON.stringify(aiRaw);\n}\n\ntext = text.replace(/```json\\s*/gi, '').replace(/```\\s*$/gi, '').trim();\nlet parsed = {};\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = {\n    needTicket: true,\n    replyMessage: \"Hệ thống đã ghi nhận sự cố của bạn và chuyển cho kỹ thuật viên IT.\",\n    ticketTitle: prev.query.slice(0, 50),\n    ticketDescription: prev.query,\n    category: \"Other\",\n    priority: \"Medium\"\n  };\n}\n\nconst ticketId = `TCK-${Math.floor(100000 + Math.random() * 900000)}`;\n\nreturn {\n  userEmail: prev.userEmail,\n  userName: prev.userName,\n  query: prev.query,\n  needTicket: !!parsed.needTicket,\n  replyMessage: parsed.replyMessage || \"Đã tiếp nhận yêu cầu.\",\n  ticketId,\n  ticketTitle: parsed.ticketTitle || prev.query,\n  ticketDescription: parsed.ticketDescription || prev.query,\n  category: parsed.category || \"Other\",\n  priority: parsed.priority || \"Medium\",\n  status: \"Open\",\n  createdAt: new Date().toISOString()\n};"
+      },
+      "id": "node-agent-parse-04",
+      "name": "Parse & Build Ticket",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-need-ticket",
+              "leftValue": "={{ $json.needTicket }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "node-agent-if-05",
+      "name": "Check If Need Ticket",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1160, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "collection": "tickets",
+        "fields": "ticketId,title,description,category,priority,status,createdAt",
+        "options": {}
+      },
+      "id": "node-agent-mongodb-06",
+      "name": "MongoDB Save Ticket",
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1.1,
+      "position": [1400, 200],
+      "credentials": {
+        "mongoDb": {
+          "id": "it-helpdesk-mongodb-cred",
+          "name": "MongoDB Atlas it_helpdesk"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"type\": \"ticket_created\",\n  \"message\": \"{{ $json.replyMessage }}\",\n  \"ticketId\": \"{{ $json.ticketId }}\",\n  \"title\": \"{{ $json.ticketTitle }}\",\n  \"category\": \"{{ $json.category }}\",\n  \"priority\": \"{{ $json.priority }}\"\n}",
+        "options": {}
+      },
+      "id": "node-agent-respond-ticket-07",
+      "name": "Respond (Ticket Created)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1640, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"type\": \"direct_answer\",\n  \"message\": \"{{ $json.replyMessage }}\"\n}",
+        "options": {}
+      },
+      "id": "node-agent-respond-answer-08",
+      "name": "Respond (Direct Answer)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1400, 420]
+    }
+  ],
+  "connections": {
+    "Webhook (Receive User Query)": {
+      "main": [
+        [{ "node": "Validate Input Query", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validate Input Query": {
+      "main": [
+        [{ "node": "Gemini Intent & Ticket Extraction", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gemini Intent & Ticket Extraction": {
+      "main": [
+        [{ "node": "Parse & Build Ticket", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse & Build Ticket": {
+      "main": [
+        [{ "node": "Check If Need Ticket", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check If Need Ticket": {
+      "main": [
+        [{ "node": "MongoDB Save Ticket", "type": "main", "index": 0 }],
+        [{ "node": "Respond (Direct Answer)", "type": "main", "index": 0 }]
+      ]
+    },
+    "MongoDB Save Ticket": {
+      "main": [
+        [{ "node": "Respond (Ticket Created)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
