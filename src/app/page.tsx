@@ -210,7 +210,7 @@ export default function Home() {
                 </section>
                 <section className="panel assistant-panel">
                   <div className="assistant-top"><div className="ai-orb">✳</div><div><span className="online-label"><i /> AI ASSISTANT ONLINE</span><h2>HelpMate AI</h2><p>Trợ lý kỹ thuật của bạn</p></div><span className="sparkle">✧</span></div>
-                  <div className="assistant-message">Xin chào Phương! 👋<br /><br />Mình có thể giúp bạn chẩn đoán lỗi, tìm hướng dẫn hoặc tạo ticket hỗ trợ.</div>
+                  <div className="assistant-message">Xin chào ! 👋<br /><br />Mình có thể giúp bạn chẩn đoán lỗi, tìm hướng dẫn hoặc tạo ticket hỗ trợ.</div>
                   <div className="suggestion-label">BẠN CẦN GIÚP GÌ?</div>
                   <button className="suggestion" onClick={() => { setPage("chat"); sendMessage("Máy tính của tôi không kết nối được Wi-Fi"); }}>⌁ <span>Khắc phục lỗi Wi-Fi</span><b>↗</b></button>
                   <button className="suggestion" onClick={() => { setPage("chat"); sendMessage("Tôi không thể đăng nhập tài khoản"); }}>♙ <span>Vấn đề tài khoản</span><b>↗</b></button>
